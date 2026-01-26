@@ -180,7 +180,7 @@ vars4matrixMDD <- tibble(
 )
 ```
 
-## Correlation Matrix for All Participants & N200, P300, CRN ERPs (n = 241)
+## Correlation Matrix for All Participants & N200, P300, CRN ERPs
 
 ```{r correlation matrix for all ps}
 # correlate the measures in the tibble for all participants
