@@ -1,0 +1,807 @@
+# Preparation {.tabset .tabset-fade .tabset-pills}
+
+## Packages
+
+```{r load packages, message=FALSE}
+library(tidyverse) # to data wrangle
+library(table1) # to create Table 1
+library(psych) # to assist in calculating and exporting Spearman's correlations
+library(corrplot) # to create figure of correlation matrix
+library(rstatix) # to simplify outlier detection, normality assumptions, and ANOVA analyses
+library(ggplot2) # to create boxplots, QQ plots, etc.
+library(patchwork) # to combine plots
+library(emmeans) # to calculate post-hoc tests
+library(MatchIt) # for propensity matching calculating
+library(optmatch) # for propensity matching cont. 
+library(cobalt) # for Love plots for the propensity matching
+library(lmtest) # for propensity matching ATE
+library(sandwich) # for propensity matching ATE
+library(broom) # for propensity matching ATE (tidy)
+```
+
+## Working directory, residualizing incorrect event-related potentials (ERPs), and reading dataframes to analyze
+
+```{r working directory}
+setwd("C:\\Users\\WVaught\\OneDrive - Laureate Institute for Brain Research\\Documents\\01. EEG CORE\\05. Papers\\SSRI EEG\\01. Submission\\data")
+```
+
+```{r reading in dataframe for analysis}
+dfT<-read.csv("T1000_redcap_wide-S.T0-2022-01-24.csv") # T1000 demographics and self-report
+dfRT <- read.csv("df2visualize_all_residN2P3.csv") # T500 RTs
+dfRT <- dfRT %>% select(c(id, ss_meanrt_go, ss_meanrt_goerror))
+dfEEG<-read.csv("SST_P3_N2_ERN_091923.csv") # T500 SST ERPs 
+dfMerged <- merge(dfT,dfEEG,by = 'id') # merging SST ERPs and T1000 demographics
+# filter a dataframe for a total number of correct stop trials of > 20; https://doi.org/10.1016/S0167-8760(96)00743-X
+dfMerged <- filter(dfMerged, AllCorrectSeg > 20)
+dfMerged <- filter(dfMerged, Dx !="NA") # filtering based on available EEG data and exclusion criteria - a current substance dependence besides AUD
+dfMerged <- merge(dfMerged, dfRT, by = 'id') # merging SST ERPs/demographics with SST RTs
+dfMerged <- select(dfMerged, c(id, Age, Dx, Rx, RxMofA, Education_4level, Ethnicity, Sex, Income, PROMIS_AnxietyTscore, PROMIS_AlcoUseTscore, PROMIS_DepressTscore, RACE_AfricanAmerican, RACE_AlaskanNative, RACE_Asian, RACE_NativeAmerican, RACE_Other, RACE_PacificIslander, RACE_White, AllCorrectSeg, AllIncorrectSeg, GoCorrectSeg,GoIncorrectSeg, GoTargetRespSeg, GoTargetIncorrRespSeg, P3_FCz_AllCorrectAvg, P3_FCz_AllIncorrectAvg, P3_Cz_AllCorrectAvg, P3_Cz_AllIncorrectAvg, P3_Pz_AllCorrectAvg, P3_Pz_AllIncorrectAvg, N2_FCz_AllCorrectAvg, N2_FCz_AllIncorrectAvg, ERN_FCz_GoTargetRespAvg, ERN_FCz_GoTargetIncorrectAvg, ERN_FCz_AllIncorrectRespAvg, ss_meanrt_go, ss_meanrt_goerror))
+dfMerged$Ethnicity <- str_replace_all(dfMerged$Ethnicity, c("Not Hispanic or Latino" = "Not Hispanic or Latine", "Hispanic or Latino" = "Hispanic or Latine"))
+# filter a dataframe for only MDD/COM participants and selecting for SERT- mechanistic medications
+dfMerged <- dfMerged %>%
+  filter(RxMofA == "SSRI" | RxMofA =="SNRI" | RxMofA == "None")
+dfMergedMDD <- dfMerged %>%
+  filter(Dx !="HC") %>%
+  filter(RxMofA == "SSRI" | RxMofA =="SNRI" | RxMofA =="None")
+dfMerged$N2_FCz_AllCorrectAvg <- as.numeric(dfMerged$N2_FCz_AllCorrectAvg)
+dfMerged$N2_FCz_AllIncorrectAvg <- as.numeric(dfMerged$N2_FCz_AllIncorrectAvg)
+dfMergedMDD$N2_FCz_AllCorrectAvg <- as.numeric(dfMergedMDD$N2_FCz_AllCorrectAvg)
+dfMergedMDD$N2_FCz_AllIncorrectAvg <- as.numeric(dfMergedMDD$N2_FCz_AllIncorrectAvg)
+```
+
+```{r regressing out incorrect signal}
+# regressing out the correct signal from the incorrect signal according to procedure introduced by Meyer et al., 2017 - Considering ERP difference scores as individual difference measures: Issues with subtraction and alternative approaches, https://doi.org/10.1111/psyp.12664
+dfMerged$N2_FCz_AllCorrectAvg <- as.numeric(dfMerged$N2_FCz_AllCorrectAvg)
+dfMerged$N2_FCz_AllIncorrectAvg <- as.numeric(dfMerged$N2_FCz_AllIncorrectAvg)
+# residualized incorrect signal in N200 @ FCz
+residual_incorrectFCz_N2 <- lm(N2_FCz_AllIncorrectAvg ~ N2_FCz_AllCorrectAvg, data = dfMerged)
+dfMerged$N2resid <- resid(residual_incorrectFCz_N2)
+# residualized incorrect signal in P300 @ Cz
+residual_incorrectCz_P3 <- lm(P3_Cz_AllIncorrectAvg ~ P3_Cz_AllCorrectAvg, data = dfMerged)
+dfMerged$P3resid_Cz <- resid(residual_incorrectCz_P3)
+# residualized incorrect signal in P300 @ Pz
+residual_incorrectPz_P3 <- lm(P3_Pz_AllIncorrectAvg ~ P3_Pz_AllCorrectAvg, data = dfMerged)
+dfMerged$P3resid_Pz <- resid(residual_incorrectPz_P3)
+# complete case dfMerged to only get participants who have ERN data avaliable
+dfMergedERN <- dfMerged[complete.cases(dfMerged),]
+# filter df to only include participants with > 6 error trials as advised by Olvet and Hajcak, 2009; https://doi.org/10.1111/j.1469-8986.2009.00848.x
+dfMergedERN <- filter(dfMergedERN, GoTargetIncorrRespSeg > 5)
+# residualized incorrect signal in N200 @ FCz - repeat for ps who have ERN
+residual_incorrectFCz_N2 <- lm(N2_FCz_AllIncorrectAvg ~ N2_FCz_AllCorrectAvg, data = dfMergedERN)
+dfMergedERN$N2resid <- resid(residual_incorrectFCz_N2)
+# residualized incorrect signal in P300 @ Cz - repeat for ps who have ERN
+residual_incorrectCz_P3 <- lm(P3_Cz_AllIncorrectAvg ~ P3_Cz_AllCorrectAvg, data = dfMergedERN)
+dfMergedERN$P3resid_Cz <- resid(residual_incorrectCz_P3)
+# residualized incorrect signal in P300 @ Pz - repeat for ps who have ERN
+residual_incorrectPz_P3 <- lm(P3_Pz_AllIncorrectAvg ~ P3_Pz_AllCorrectAvg, data = dfMergedERN)
+dfMergedERN$P3resid_Pz <- resid(residual_incorrectPz_P3)
+# residualized incorrect signal in ERN @ FCz 
+residual_incorrectFCz_ERN <- lm(ERN_FCz_GoTargetIncorrectAvg ~ ERN_FCz_GoTargetRespAvg, data = dfMergedERN)
+dfMergedERN$ERNresid <- resid(residual_incorrectFCz_ERN)
+```
+
+# Tests of Normality {.tabset .tabset-fade .tabset-pills}
+
+## Shapiro-Wilk tests, describe function, histograms, and QQ plots in all participants
+
+```{r descriptives_age_all}
+shapiro.test(dfMerged$Age)
+describe(dfMerged$Age)
+hist(dfMerged$Age)
+qqnorm(dfMerged$Age)
+qqline(dfMerged$Age)
+```
+
+```{r descriptives_income_all}
+shapiro.test(dfMerged$Income)
+describe(dfMerged$Income)
+hist(dfMerged$Income)
+qqnorm(dfMerged$Income)
+qqline(dfMerged$Income)
+```
+
+```{r descriptivescorrN200 all}
+shapiro.test(dfMerged$N2_FCz_AllCorrectAvg)
+describe(dfMerged$N2_FCz_AllCorrectAvg)
+hist(dfMerged$N2_FCz_AllCorrectAvg)
+qqnorm(dfMerged$N2_FCz_AllCorrectAvg)
+qqline(dfMerged$N2_FCz_AllCorrectAvg)
+```
+
+```{r descriptives_corrP300_Pz all}
+shapiro.test(dfMerged$P3_Pz_AllCorrectAvg)
+describe(dfMerged$P3_Pz_AllCorrectAvg)
+hist(dfMerged$P3_Pz_AllCorrectAvg)
+qqnorm(dfMerged$P3_Pz_AllCorrectAvg)
+qqline(dfMerged$P3_Pz_AllCorrectAvg)
+```
+
+```{r descriptives_CRN all}
+shapiro.test(dfMerged$ERN_FCz_GoTargetRespAvg)
+describe(dfMerged$ERN_FCz_GoTargetRespAvg)
+hist(dfMerged$ERN_FCz_GoTargetRespAvg)
+qqnorm(dfMerged$ERN_FCz_GoTargetRespAvg)
+qqline(dfMerged$ERN_FCz_GoTargetRespAvg)
+```
+
+```{r descriptives_promisDep all}
+shapiro.test(dfMerged$PROMIS_DepressTscore)
+describe(dfMerged$PROMIS_DepressTscore)
+hist(dfMerged$PROMIS_DepressTscore)
+qqnorm(dfMerged$PROMIS_DepressTscore)
+qqline(dfMerged$PROMIS_DepressTscore)
+```
+
+```{r descriptives_promisAnx all}
+shapiro.test(dfMerged$PROMIS_AnxietyTscore)
+describe(dfMerged$PROMIS_AnxietyTscore)
+hist(dfMerged$PROMIS_AnxietyTscore)
+qqnorm(dfMerged$PROMIS_AnxietyTscore)
+qqline(dfMerged$PROMIS_AnxietyTscore)
+```
+
+```{r descriptives_promisAlcUse all}
+shapiro.test(dfMerged$PROMIS_AlcoUseTscore)
+describe(dfMerged$PROMIS_AlcoUseTscore)
+hist(dfMerged$PROMIS_AlcoUseTscore)
+qqnorm(dfMerged$PROMIS_AlcoUseTscore)
+qqline(dfMerged$PROMIS_AlcoUseTscore)
+```
+
+# Bivariate Correlations {.tabset .tabset-fade .tabset-pills}
+
+## Tibbles for Correlation Matrices
+
+```{r tibble for correlation matrix of all ps}
+# create tibble for all ps
+vars4matrixAll <- tibble(
+  Age = dfMerged$Age,
+  "Corr N200 FCz" = dfMerged$N2_FCz_AllCorrectAvg,
+  "Corr P300 Pz" = dfMerged$P3_Pz_AllCorrectAvg,
+  "CRN FCz" = dfMerged$ERN_FCz_GoTargetRespAvg,
+  "Log Go RTs" = log(dfMerged$ss_meanrt_go),
+  "PROMIS Alcohol Use" = dfMerged$PROMIS_AlcoUseTscore,
+  "PROMIS Anxiety" = dfMerged$PROMIS_AnxietyTscore,
+  "PROMIS Depression" = dfMerged$PROMIS_DepressTscore
+)
+```
+
+```{r tibble for correlation matrix of MDD/COM ps}
+vars4matrixMDD <- tibble(
+  Age = dfMergedMDD$Age,
+  "Corr N200 FCz" = dfMergedMDD$N2_FCz_AllCorrectAvg,
+  "Corr P300 Cz" = dfMergedMDD$P3_Cz_AllCorrectAvg,
+  "Corr P300 Pz" = dfMergedMDD$P3_Pz_AllCorrectAvg,
+  "CRN FCz" = dfMergedMDD$ERN_FCz_GoTargetRespAvg,
+  "Log Go RTs" = log(dfMergedMDD$ss_meanrt_go),
+  "PROMIS Alcohol Use" = dfMergedMDD$PROMIS_AlcoUseTscore,
+  "PROMIS Anxiety" = dfMergedMDD$PROMIS_AnxietyTscore,
+  "PROMIS Depression" = dfMergedMDD$PROMIS_DepressTscore
+)
+```
+
+## Correlation Matrix for All Participants & N200, P300, CRN ERPs (n = 241)
+
+```{r correlation matrix for all ps}
+# correlate the measures in the tibble for all participants
+rAll <- corr.test(vars4matrixAll, method = "spearman", adjust = "none")$r
+pAll <- corr.test(vars4matrixAll, method = "spearman", adjust = "none")$p
+# create correlation matrix of the correlations for all participants
+corrplot(rAll, p.mat = pAll, method = 'ellipse',diag = FALSE, col = COL2('PuOr'), tl.col = "black", tl.cex = 1.0, cl.cex = 1.00, type = "lower", sig.level = c(0.001,0.01,0.05), pch.cex = 1.00, insig = "label_sig", pch.col = "black")
+```
+
+## Scatterplots for Significant Associations for All Ps & Some ERPs
+
+```{r corr P3 Pz x PROMIS Anx}
+# linear model of PROMIS_Anx ~ corrP3
+model <- lm(PROMIS_AnxietyTscore ~ P3_Pz_AllCorrectAvg, data = dfMerged)
+eqn <- sprintf(
+  "italic(y) == %.3g %.3g * italic(x) * ',' ~~ italic(r)^2 ~ '=' ~ %.2g",
+  coef(model)[1],
+  coef(model)[2],
+  summary(model)$r.squared
+)
+parse(text=eqn)
+# scatterplot with lm fit
+scatterAnx_corrP3_Pz <-ggplot(dfMerged, aes(x = P3_Pz_AllCorrectAvg, y = PROMIS_AnxietyTscore)) + 
+  geom_point() + 
+  stat_smooth(method = lm, se = TRUE,colour = "black") + 
+  annotate(
+    "text",
+    x = Inf, y = -Inf,
+    label = eqn, parse = TRUE,
+    hjust = 1.1, vjust = -1.5
+  ) + theme_classic()
+scatterAnx_corrP3_Pz <- scatterAnx_corrP3_Pz + ggtitle("PROMIS Anxiety and Correct-Stop P300 Mean Amplitudes @ Pz") + xlab("Correct-Stop P300 Mean Amplitudes @ Pz (μV)") + ylab("PROMIS Anxiety (T score)")
+```
+## Correlation Matrix for MDD/COM Participants & N200, P300, CRN ERPs (n = 185)
+
+```{r correlation matrix for MDD/COM ps}
+rMDD <- corr.test(vars4matrixMDD, method = "spearman",adjust = "none")$r
+pMDD <- corr.test(vars4matrixMDD, method = "spearman",adjust = "none")$p
+corrplot(rMDD, p.mat = pMDD, method = 'ellipse', diag = FALSE, type = 'lower', sig.level = c(0.001,0.01,0.05), pch.cex = 0.75, insig = 'label_sig', pch.col = "black")
+```
+
+# Table 1 {.tabset .tabset-fade .tabset-pills}
+
+## Tibbles for Table 1
+
+```{r tibble4table1}
+# mutate to create groups for Table 1
+dfMerged <- dfMerged %>%
+  mutate(Group = case_when(
+    Dx == "HC" & Sex == "Female" ~ "HC F",
+    Dx == "HC" & Sex == "Male" ~ "HC M",
+    Dx == "MDD" & Sex == "Female" & Rx == "NonSero" ~ "Unmed MDD F",
+    Dx == "MDD" & Sex == "Male" & Rx == "NonSero" ~ "Unmed MDD M",
+    Dx == "COM" & Sex == "Female" & Rx == "NonSero" ~ "Unmed COM F",
+    Dx == "COM" & Sex == "Male" & Rx == "NonSero" ~ "Unmed COM M",
+    Dx == "MDD" & Sex == "Female" & Rx == "Sero" ~ "Med MDD F",
+    Dx == "MDD" & Sex == "Male" & Rx == "Sero" ~ "Med MDD M",
+    Dx == "COM" & Sex == "Female" & Rx == "Sero" ~ "Med COM F",
+    Dx == "COM" & Sex == "Male" & Rx == "Sero" ~ "Med COM M"
+))
+# tibble time for Table 1
+vars4table1 <- tibble(
+  Age = dfMerged$Age,
+  Education = dfMerged$Education_4level,
+  Income = dfMerged$Income,
+  "Alaskan Native" = dfMerged$RACE_AlaskanNative,
+  "Asian" = dfMerged$RACE_Asian,
+  "Black" = dfMerged$RACE_AfricanAmerican,
+  "Hispanic or Latine" = dfMerged$Ethnicity,
+  "Native American" = dfMerged$RACE_NativeAmerican,
+  "Other" = dfMerged$RACE_Other,
+  "Pacific Islander" = dfMerged$RACE_PacificIslander,
+  "White" = dfMerged$RACE_White,
+  "Corr N200 FCz" = dfMerged$N2_FCz_AllCorrectAvg,
+  "Corr P300 Pz" = dfMerged$P3_Pz_AllCorrectAvg,
+  "CRN FCz" = dfMerged$ERN_FCz_GoTargetRespAvg,
+  "Go RTs" = dfMerged$ss_meanrt_go,
+  "PROMIS Alcohol Use" = dfMerged$PROMIS_AlcoUseTscore,
+  "PROMIS Anxiety" = dfMerged$PROMIS_AnxietyTscore,
+  "PROMIS Depression" = dfMerged$PROMIS_DepressTscore,
+  Group = dfMerged$Group
+)
+```
+
+## Table 1
+
+```{r statistics4table1}
+# Age
+describeAge <- describeBy(vars4table1$Age, group = vars4table1$Group)
+aovAge <- aov(Age ~ Group, data = vars4table1)
+summary(aovAge)
+# Income
+describeIncome <- describeBy(vars4table1$Income, group = vars4table1$Group)
+kwIncome <- kruskal.test(Income ~ Group, data = vars4table1)
+kwIncome
+# PROMIS Anxiety
+describePROMISanx <- describeBy(vars4table1$`PROMIS Anxiety`, group = vars4table1$Group)
+aovPROMISanx <- aov(`PROMIS Anxiety` ~ Group, data = vars4table1)
+summary(aovPROMISanx)
+# PROMIS Depression
+describePROMISdep <- describeBy(vars4table1$`PROMIS Depression`, group = vars4table1$Group)
+aovPROMISdep <- aov(`PROMIS Depression` ~ Group, data = vars4table1)
+summary(aovPROMISdep)
+# PROMIS Alcohol Use
+describePROMISalcUse <- describeBy(vars4table1$`PROMIS Alcohol Use`, group = vars4table1$Group)
+aovPROMISalcUse <- aov(`PROMIS Alcohol Use` ~ Group, data = vars4table1)
+summary(aovPROMISalcUse)
+# N200
+describeN200 <- describeBy(vars4table1$`Corr N200 FCz`, group = vars4table1$Group)
+aovN200 <- aov(`Corr N200 FCz` ~ Group, data = vars4table1)
+summary(aovN200)
+# P300 
+describeP300 <- describeBy(vars4table1$`Corr P300 Pz`, group = vars4table1$Group)
+aovP300 <- aov(`Corr P300 Pz` ~ Group, data = vars4table1)
+summary(aovP300)
+# CRN
+describeCRN <- describeBy(vars4table1$`CRN FCz`, group = vars4table1$Group)
+aovCRN <- aov(`CRN FCz` ~ Group, data = vars4table1)
+summary(aovCRN)
+# Go RTs
+describeRTs <- describeBy(vars4table1$`Go RTs`, group = vars4table1$Group)
+aovRTs <- aov(`Go RTs` ~ Group, data = vars4table1)
+summary(aovRTs)
+# Alaskan Native
+tableAN <- table(vars4table1$`Alaskan Native`, vars4table1$Group) # 0 participants
+# Asian
+tableAs <- table(vars4table1$Asian, vars4table1$Group)
+chisq.test(tableAs)
+# Black
+tableBl <- table(vars4table1$Black, vars4table1$Group)
+chisq.test(tableBl)
+# Hispanic
+tableHL <- table(vars4table1$`Hispanic or Latine`, vars4table1$Group)
+chisq.test(tableHL)
+# Native American
+tableNA <- table(vars4table1$`Native American`, vars4table1$Group)
+chisq.test(tableNA)
+# Other 
+tableOt <- table(vars4table1$Other, vars4table1$Group)
+chisq.test(tableOt)
+# Pacific Islander
+tablePI <- table(vars4table1$`Pacific Islander`, vars4table1$Group)
+chisq.test(tablePI)
+# White
+tableWh <- table(vars4table1$White, vars4table1$Group)
+chisq.test(tableWh)
+# Education 
+tableEdu <- table(vars4table1$Education, vars4table1$Group)
+chisq.test(tableEdu)
+# Missing data
+perColumnNAs <- colSums(is.na(vars4table1))
+perColumnNAs
+```
+
+# Outliers Removal 
+
+## 9 Participants Removed from Correct Stop-N200 Amplitudes for All Participants
+
+```{r corr N200 outliers all}
+outliers <- dfMerged %>%
+  group_by(Sex, Dx) %>%
+  identify_outliers(N2_FCz_AllCorrectAvg)
+corrN2_fcz_outliers_HC <- dfMerged %>%
+  left_join(outliers, by = colnames(dfMerged))
+corrN2_fcz_outliers_HC <- corrN2_fcz_outliers_HC %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+corrN2_FCz_outliersRemoved_HC <- corrN2_fcz_outliers_HC %>% filter(!is.outlier)
+```
+
+## 5 Participants Removed from Correct Stop-P300 Amplitudes for All Participants
+
+```{r corr P300 Pz outliers all}
+outliers <- dfMerged %>%
+  group_by(Sex, Dx) %>%
+  identify_outliers(P3_Pz_AllCorrectAvg)
+corrP3_pz_outliers_HC <- dfMerged %>%
+  left_join(outliers, by = colnames(dfMerged))
+corrP3_pz_outliers_HC <- corrP3_pz_outliers_HC %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+corrP3_Pz_outliersRemoved_HC <- corrP3_pz_outliers_HC %>% filter(!is.outlier)
+```
+
+## 13 Participants Removed from CRN Amplitudes for All Participants 
+
+```{r CRN FCz outliers all}
+outliers <- dfMerged %>%
+  group_by(Sex, Dx) %>% 
+  identify_outliers(ERN_FCz_GoTargetRespAvg)
+CRN_FCz_outliers_HC <- dfMerged %>%
+  left_join(outliers, by = colnames(dfMerged))
+CRN_FCz_outliers_HC <- CRN_FCz_outliers_HC %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+CRN_FCz_outliersRemoved_HC <- CRN_FCz_outliers_HC %>% filter(!is.outlier)
+```
+
+## 7 Participants Removed from Correct Stop-N200 Amplitudes for MDD/COM Participants
+
+```{r corr N200 outliers MDD/COM}
+outliers <- dfMergedMDD %>%
+  group_by(Sex, Dx, Rx) %>%
+  identify_outliers(N2_FCz_AllCorrectAvg)
+corrN2_FCz_outliers_MDD <- dfMergedMDD %>%
+  left_join(outliers, by = colnames(dfMergedMDD))
+corrN2_FCz_outliers_MDD <- corrN2_FCz_outliers_MDD %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+corrN2_FCz_outliersRemoved_MDD <- corrN2_FCz_outliers_MDD %>% filter(!is.outlier)
+```
+
+## 2 Participants Removed from Correct Stop-P300 Amplitudes for MDD/COM Participants
+
+```{r corr P300 Pz outliers MDD/COM}
+outliers <- dfMergedMDD %>%
+  group_by(Sex, Dx, Rx) %>%
+  identify_outliers(P3_Pz_AllCorrectAvg)
+corrP3_Pz_outliers_MDD <- dfMergedMDD %>%
+  left_join(outliers, by = colnames(dfMergedMDD))
+corrP3_Pz_outliers_MDD <- corrP3_Pz_outliers_MDD %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+corrP3_Pz_outliersRemoved_MDD <- corrP3_Pz_outliers_MDD %>% filter(!is.outlier)
+```
+
+## 10 Participants Removed from CRN Amplitudes for MDD/COM Participants
+
+```{r r CRN FCz outliers MDD/COM}
+outliers <- dfMergedMDD %>%
+  group_by(Sex, Dx, Rx) %>%
+  identify_outliers(ERN_FCz_GoTargetRespAvg)
+CRN_FCz_outliers_MDD <- dfMergedMDD %>%
+  left_join(outliers, by = colnames(dfMergedMDD))
+CRN_FCz_outliers_MDD <- CRN_FCz_outliers_MDD %>%
+  mutate(
+    is.outlier = replace_na(is.outlier, FALSE),
+    is.extreme = replace_na(is.extreme, FALSE)
+  )
+CRN_FCz_outliersRemoved_MDD <- CRN_FCz_outliers_MDD %>% filter(!is.outlier)
+```
+
+# Statistical analyses between HC and MDD/COM samples {.tabset .tabset-fade .tabset-pills}
+
+## Correct Stop-N200 Amplitudes for All Participants
+
+```{r N2_FCz QQ plot}
+qqPlot_N2_FCz_HC <- ggplot(corrN2_FCz_outliersRemoved_HC, aes(sample = N2_FCz_AllCorrectAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_N2_FCz_HC <- qqPlot_N2_FCz_HC + ylab("Sample") + xlab("Theoretical") + theme_classic()
+```
+
+```{r corrN2_FCz ANOVA}
+# ANOVA
+aovCorrN2FCz_HC <- corrN2_FCz_outliersRemoved_HC %>% 
+  anova_test(N2_FCz_AllCorrectAvg ~ Dx * Sex, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCorrN2FCz_HC # significant main effect of Sex
+# pairwise comparison (inspect main effects)
+corrN2_FCz_outliersRemoved_HC %>%
+  pairwise_t_test(
+    N2_FCz_AllCorrectAvg ~ Sex,
+    p.adjust.method = "bonferroni"
+  )
+```
+
+```{r corrN2_FCz violin plot}
+vioPlotCorrN200FCz_HC <- ggplot(corrN2_FCz_outliersRemoved_HC, aes (x = Sex, y = N2_FCz_AllCorrectAvg, fill = Sex)) + geom_violin(trim = FALSE) + labs(x = "Sex", y = "Amplitude (μV)") + scale_fill_manual(values = c("#5f6266","#f8f9fa"), guide = "none")
+vioPlotCorrN200FCz_HC <- vioPlotCorrN200FCz_HC + geom_jitter(shape = 16, position = position_jitter(0.2)) + theme_classic()
+```
+
+```{r corrN2_FCz bar graph}
+# creating dataframe with summary statistics 
+corrN2_FCz_HC_Sum <- corrN2_FCz_outliersRemoved_HC %>%
+  group_by(Sex) %>%
+  summarize(mean=mean(N2_FCz_AllCorrectAvg),
+            se=sd(N2_FCz_AllCorrectAvg)/sqrt(length(N2_FCz_AllCorrectAvg))
+            )
+# creating bar graph (with error bars)
+corrN2_FCz_HC_barGraph <- ggplot(corrN2_FCz_HC_Sum, aes(x = Sex, y = mean, fill = Sex)) + 
+  geom_col(colour = 'black') + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.1) + theme_classic() + scale_fill_manual(values = c("#5f6266","#f8f9fa"), guide = "none")
+```
+
+```{r patchwork_corrN2_FCz_All}
+patchwork_corrN2_FCz_All <-
+  qqPlot_N2_FCz_HC +
+  corrN2_FCz_HC_barGraph +
+  vioPlotCorrN200FCz_HC
+patchwork_corrN2_FCz_All
+```
+
+## Correct Stop-P300 Amplitudes for All Participants
+
+```{r corrP3_Pz QQ plot}
+qqPlot_corrP3_Pz_HC <- ggplot(corrP3_Pz_outliersRemoved_HC, aes(sample = P3_Pz_AllCorrectAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_corrP3_Pz_HC <- qqPlot_corrP3_Pz_HC + ylab("Sample") + xlab("Theoretical") + theme_classic()
+```
+
+```{r corrP3_Pz ANOVA}
+# ANOVA
+aovCorrP3Pz_HC <- corrP3_Pz_outliersRemoved_HC %>% 
+  anova_test(P3_Pz_AllCorrectAvg ~ Dx * Sex, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCorrP3Pz_HC # significant main effect of Dx
+# pairwise comparison (inspect main effects)
+corrP3_Pz_outliersRemoved_HC %>%
+  pairwise_t_test(
+    P3_Pz_AllCorrectAvg ~ Dx,
+    p.adjust.method = "bonferroni"
+  )
+```
+
+```{r corrP3_Pz violin plot}
+vioPlotCorrP300Pz_HC <- ggplot(corrP3_Pz_outliersRemoved_HC, aes (x = Dx, y = P3_Pz_AllCorrectAvg, fill = Dx)) + geom_violin(trim = FALSE) + labs(x = "Diagnosis", y = "Amplitude (μV)")
+vioPlotCorrP300Pz_HC <- vioPlotCorrP300Pz_HC + geom_jitter(shape = 16, position = position_jitter(0.2)) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r corrP3_Pz bar graph}
+# creating dataframe with summary statistics 
+corrP3_Pz_HC_Sum <- corrP3_Pz_outliersRemoved_HC %>%
+  group_by(Dx) %>%
+  summarize(mean=mean(P3_Pz_AllCorrectAvg),
+            se=sd(P3_Pz_AllCorrectAvg)/sqrt(length(P3_Pz_AllCorrectAvg))
+            )
+# creating bar graph (with error bars)
+corrP3_Pz_HC_barGraph <- ggplot(corrP3_Pz_HC_Sum, aes(x = Dx, y = mean, fill = Dx)) + 
+  geom_col(colour = 'black') + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.1) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r patchwork_corrP3_Pz_All}
+patchwork_corrP3_Pz_All <- qqPlot_corrP3_Pz_HC +
+  corrP3_Pz_HC_barGraph +
+  vioPlotCorrP300Pz_HC
+patchwork_corrP3_Pz_All
+```
+
+## CRN Amplitudes for All Participants 
+
+```{r CRN_FCz QQ plot}
+qqPlot_CRN_FCz_HC <- ggplot(CRN_FCz_outliersRemoved_HC, aes(sample = ERN_FCz_GoTargetRespAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_CRN_FCz_HC + ylab("Sample") + xlab("Theoretical") + ggtitle("QQ Plot of CRN Mean Amplitudes @ FCz in All Participants") + theme_classic()
+```
+
+```{r CRN_FCz ANOVA}
+aovCRNFCz_HC <- CRN_FCz_outliersRemoved_HC %>%
+  anova_test(ERN_FCz_GoTargetRespAvg ~ Dx * Sex, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCRNFCz_HC # no significant effects
+```
+
+# Statistical analyses within the MDD/COM sample {.tabset .tabset-fade .tabset-pills}
+
+## Correct Stop-N200 Amplitudes for MDD/COM Participants
+
+```{r corrN2_FCz_MDD QQ plot}
+qqPlot_N2_FCz_MDD <- ggplot(corrN2_FCz_outliersRemoved_MDD, aes(sample = N2_FCz_AllCorrectAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_N2_FCz_MDD <- qqPlot_N2_FCz_MDD + ylab("Sample") + xlab("Theoretical") + theme_classic()
+```
+
+```{r corrN2_FCz propensity matching preparation}
+# using https://www.youtube.com/watch?v=7vwewIsSAls for learning this technique
+corrN2_FCz_outliersRemoved_MDD$RxCoded <- str_replace_all(corrN2_FCz_outliersRemoved_MDD$Rx, c("NonSero"="0","Sero"="1"))
+corrN2_FCz_outliersRemoved_MDD$RxCoded <- as.numeric(corrN2_FCz_outliersRemoved_MDD$RxCoded)
+# remove participants who have incomplete PROMIS measures (or other covariates)
+corrN2_FCz_outliersRemoved_MDD <- corrN2_FCz_outliersRemoved_MDD[complete.cases(corrN2_FCz_outliersRemoved_MDD[ , c('PROMIS_AnxietyTscore','PROMIS_DepressTscore')]), ]
+# match using glm, optimal full matching, and average treatment effect (ATE)
+psa_full_corr_N2_FCz <- matchit(RxCoded ~ Sex + PROMIS_AnxietyTscore + PROMIS_DepressTscore + Dx + Age + ss_meanrt_go, data = corrN2_FCz_outliersRemoved_MDD, distance = "glm", method = "full", estimand = "ATE")
+summary(psa_full_corr_N2_FCz)
+```
+
+```{r corrN2_FCz Love plot}
+lovePlotCorrN2_FCz <- love.plot(bal.tab(psa_full_corr_N2_FCz),
+                                stat = c("m","v"),
+                                grid = TRUE,
+                                stars = "std",
+                                thresholds = c(m=0.10,v=1.10))
+lovePlotCorrN2_FCz
+psa_full_matchedDataCorrN2_FCz <- match.data(psa_full_corr_N2_FCz)
+```
+
+```{r corrN2_FCz ANOVAs and weighted regression MDD/COM}
+# weighted regression with weights from matched data
+weightedModelCorrN2FCz_MDD <- lm(N2_FCz_AllCorrectAvg ~ RxCoded + Sex + PROMIS_AnxietyTscore + PROMIS_DepressTscore  + Dx + Age + ss_meanrt_go, data = psa_full_matchedDataCorrN2_FCz, weights = weights)
+summary(weightedModelCorrN2FCz_MDD) # Rx unqiuely predicts correct-stop N200 amplitudes
+# code for information about SE, CI, and p-values
+vcov_cr <- vcovCL(
+  weightedModelCorrN2FCz_MDD,
+  cluster = psa_full_matchedDataCorrN2_FCz$subclass
+)
+coeftest(weightedModelCorrN2FCz_MDD, vcov = vcov_cr)
+tidyWeightedModel_CorrN2_FCz_MDD <- tidy(
+  weightedModelCorrN2FCz_MDD,
+  vcov = vcov_cr,
+  conf.int = TRUE
+)
+tidyWeightedModel_CorrN2_FCz_MDD
+# ANOVA
+aovCorrN2FCz_MDD <- corrN2_FCz_outliersRemoved_MDD %>% 
+  anova_test(N2_FCz_AllCorrectAvg ~ Rx * Sex * Dx, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCorrN2FCz_MDD # Rx and Sex predict N200 amplitudes, but Rx survies bonferroni correction
+```
+
+```{r corrN2_FCz_MDD violin plot}
+# adding on HC participants from corrN2_FCz_outliersRemoved_HC into dataframe
+corrN2_FCz_outliersRemoved_HConly <- corrN2_FCz_outliersRemoved_HC %>%
+  filter(Dx == "HC")
+corrN2_FCz_outliersRemoved_MDDvHC <- bind_rows(corrN2_FCz_outliersRemoved_HConly,corrN2_FCz_outliersRemoved_MDD)
+corrN2_FCz_outliersRemoved_MDDvHC <- corrN2_FCz_outliersRemoved_MDDvHC %>%
+  mutate(Rx = case_when(
+    Dx == "HC" ~ "Non",
+    Rx == "NonSero" ~ "Unmed",
+    Rx == "Sero" ~ "Med"
+  ))
+# creating violin plot of all three groups
+vioPlotCorrN200FCz_MDD <- ggplot(corrN2_FCz_outliersRemoved_MDDvHC, aes (x = Rx, y = N2_FCz_AllCorrectAvg, fill = Rx)) + geom_violin(trim = FALSE) + labs(x = "Medication", y = "Amplitude (μV)")
+vioPlotCorrN200FCz_MDD <- vioPlotCorrN200FCz_MDD + geom_jitter(shape = 16, position = position_jitter(0.2)) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r corrN2_FCz_MDD bar graph}
+# creating dataframe with summary statistics 
+corrN2_FCz_MDD_Sum <- corrN2_FCz_outliersRemoved_MDDvHC %>%
+  group_by(Rx) %>%
+  summarize(mean=mean(N2_FCz_AllCorrectAvg),
+            se=sd(N2_FCz_AllCorrectAvg)/sqrt(length(N2_FCz_AllCorrectAvg)))
+# creating bar graph (with error bars)
+corrN2_FCz_MDD_barGraph <- ggplot(corrN2_FCz_MDD_Sum, aes(x = Rx, y = mean, fill = Rx)) + 
+  geom_col(colour = 'black') + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r patchwork_corrN2_FCz_MDD}
+patchwork_corrN2_FCz_MDD <- qqPlot_N2_FCz_MDD +
+  corrN2_FCz_MDD_barGraph + 
+  vioPlotCorrN200FCz_MDD
+patchwork_corrN2_FCz_MDD
+```
+
+## Correct Stop-P300 Amplitudes for MDD/COM Participants
+
+```{r corrP3_Pz_MDD QQ plot}
+qqPlot_corrP3_Pz_MDD <- ggplot(corrP3_Pz_outliersRemoved_MDD, aes(sample = P3_Pz_AllCorrectAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_corrP3_Pz_MDD <- qqPlot_corrP3_Pz_MDD + ylab("Sample") + xlab("Theoretical") + theme_classic()
+```
+
+```{r corrP3_Pz propensity matching preparation}
+# using https://www.youtube.com/watch?v=7vwewIsSAls for learning this technique
+corrP3_Pz_outliersRemoved_MDD$RxCoded <- str_replace_all(corrP3_Pz_outliersRemoved_MDD$RxMofA, c("None"="0","SSRI"="1","SNRI"="1"))
+corrP3_Pz_outliersRemoved_MDD$RxCoded <- as.numeric(corrP3_Pz_outliersRemoved_MDD$RxCoded)
+# remove participants who have incomplete PROMIS measures (or other covariates)
+corrP3_Pz_outliersRemoved_MDD <- corrP3_Pz_outliersRemoved_MDD[complete.cases(corrP3_Pz_outliersRemoved_MDD[ , c('PROMIS_AnxietyTscore','PROMIS_DepressTscore')]), ]
+# match using glm, optimal full matching, and average treatment effect (ATE)
+psa_full_corr_P3_Pz <- matchit(RxCoded ~ Sex + PROMIS_AnxietyTscore + PROMIS_DepressTscore + Dx + Age + ss_meanrt_go, data = corrP3_Pz_outliersRemoved_MDD, distance = "glm", method = "full", estimand = "ATE")
+summary(psa_full_corr_P3_Pz)
+```
+
+```{r corrP3_Pz Love plot}
+lovePlotCorrP3_Pz <- love.plot(bal.tab(psa_full_corr_P3_Pz),
+                                stat = c("m","v"),
+                                grid = TRUE,
+                                stars = "std",
+                                thresholds = c(m=0.10,v=1.10))
+lovePlotCorrP3_Pz
+psa_full_matchedDataCorrP3_Pz <- match.data(psa_full_corr_P3_Pz)
+```
+
+```{r corrP3_Pz ANOVAs and weighted regression MDD/COM}
+# weighted regression with weights from matched data
+weightedModelCorrP3Pz_MDD <- lm(P3_Pz_AllCorrectAvg ~ RxCoded + ss_meanrt_go + Sex + PROMIS_AnxietyTscore + PROMIS_DepressTscore  + Dx + Age, data = psa_full_matchedDataCorrP3_Pz, weights = weights)
+summary(weightedModelCorrP3Pz_MDD) # Rx predicts correct-stop P300 amplitudes
+# code for information about SE, CI, and p-values
+vcov_cr <- vcovCL(
+  weightedModelCorrP3Pz_MDD,
+  cluster = psa_full_matchedDataCorrP3_Pz$subclass
+)
+coeftest(weightedModelCorrP3Pz_MDD, vcov = vcov_cr)
+tidyWeightedModel_CorrP3_Pz_MDD <- tidy(
+  weightedModelCorrP3Pz_MDD,
+  vcov = vcov_cr,
+  conf.int = TRUE
+)
+tidyWeightedModel_CorrP3_Pz_MDD
+# ANOVA
+aovCorrP3Pz_MDD <- corrP3_Pz_outliersRemoved_MDD %>% 
+  anova_test(P3_Pz_AllCorrectAvg ~ Rx * Sex * Dx, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCorrP3Pz_MDD # no significant effects
+```
+
+```{r corrP3_Pz_MDD violin plot}
+# adding on HC participants from corrN2_FCz_outliersRemoved_HC into dataframe
+corrP3_Pz_outliersRemoved_HConly <- corrP3_Pz_outliersRemoved_HC %>%
+  filter(Dx == "HC")
+corrP3_Pz_outliersRemoved_MDDvHC <- bind_rows(corrP3_Pz_outliersRemoved_HConly,corrP3_Pz_outliersRemoved_MDD)
+corrP3_Pz_outliersRemoved_MDDvHC <- corrP3_Pz_outliersRemoved_MDDvHC %>%
+  mutate(Rx = case_when(
+    Dx == "HC" ~ "Non",
+    Rx == "NonSero" ~ "Unmed",
+    Rx == "Sero" ~ "Med"
+  ))
+# violin plot per Rx (to demonstrate propensity matching results)
+vioPlotCorrP300Pz_MDD <- ggplot(corrP3_Pz_outliersRemoved_MDDvHC, aes (x = Rx, y = P3_Pz_AllCorrectAvg, fill = Rx)) + geom_violin(trim = FALSE) + labs(x = "Rx", y = "Amplitude (μV)") +  scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+vioPlotCorrP300Pz_MDD <- vioPlotCorrP300Pz_MDD + geom_jitter(shape = 16, position = position_jitter(0.2)) + theme_classic()
+```
+
+```{r corrP3_Pz box graph}
+# creating dataframe with summary statistics 
+corrP3_Pz_MDD_Sum <- corrP3_Pz_outliersRemoved_MDDvHC %>%
+  group_by(Rx) %>%
+  summarize(mean=mean(P3_Pz_AllCorrectAvg),
+            se=sd(P3_Pz_AllCorrectAvg)/sqrt(length(P3_Pz_AllCorrectAvg)))
+# creating bar graph (with error bars)
+corrP3_Pz_MDD_barGraph <- ggplot(corrP3_Pz_MDD_Sum, aes(x = Rx, y = mean, fill = Rx)) + 
+  geom_col(colour = 'black') + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r patchwork corrP3_Pz}
+patchwork_corrP3_Pz_MDD <- qqPlot_corrP3_Pz_MDD + 
+corrP3_Pz_MDD_barGraph + vioPlotCorrP300Pz_MDD + plot_layout(ncol = 3)
+patchwork_corrP3_Pz_MDD # 900 w x 400 h 
+```
+
+## CRN Amplitudes for MDD/COM Participants
+
+```{r CRN_FCz_MDD QQ plot}
+qqPlot_CRN_FCz_MDD <- ggplot(CRN_FCz_outliersRemoved_MDD, aes(sample = ERN_FCz_GoTargetRespAvg)) + 
+  geom_qq() +
+  geom_qq_line()
+qqPlot_CRN_FCz_MDD <- qqPlot_CRN_FCz_MDD + ylab("Sample") + xlab("Theoretical") + ggtitle("QQ Plot of CRN Mean Amplitudes @ FCz in MDD/COM Participants") + theme_classic()
+```
+
+```{r CRN_FCz propensity matching preparation}
+# using https://www.youtube.com/watch?v=7vwewIsSAls for learning this technique
+CRN_FCz_outliersRemoved_MDD$RxCoded <- str_replace_all(CRN_FCz_outliersRemoved_MDD$RxMofA, c("None"="0","SSRI"="1","SNRI"="1"))
+CRN_FCz_outliersRemoved_MDD$RxCoded <- as.numeric(CRN_FCz_outliersRemoved_MDD$RxCoded)
+# remove participants who have incomplete PROMIS measures (or other covariates)
+CRN_FCz_outliersRemoved_MDD <- CRN_FCz_outliersRemoved_MDD[complete.cases(CRN_FCz_outliersRemoved_MDD[ , c('PROMIS_AnxietyTscore','PROMIS_DepressTscore')]), ]
+# match using glm, optimal full matching, and average treatment effect (ATE)
+psa_full_CRN_FCz <- matchit(RxCoded ~ Sex + PROMIS_AnxietyTscore  + PROMIS_DepressTscore + Dx + Age + ss_meanrt_go, data = CRN_FCz_outliersRemoved_MDD, distance = "glm", method = "full", estimand = "ATE")
+summary(psa_full_CRN_FCz)
+```
+
+```{r CRN_FCz Love plot}
+lovePlotCRN_FCz <- love.plot(bal.tab(psa_full_CRN_FCz),
+                                stat = c("m","v"),
+                                grid = TRUE,
+                                stars = "std",
+                                thresholds = c(m=0.10,v=1.10))
+lovePlotCRN_FCz
+psa_full_matchedDataCRN_FCz <- match.data(psa_full_CRN_FCz)
+```
+
+```{r CRN_FCz ANOVAs and weighted regression MDD/COM}
+# weighted regression with weights from matched data
+weightedModelCRN_FCz_MDD <- lm(ERN_FCz_GoTargetRespAvg ~ RxCoded + Sex + PROMIS_AnxietyTscore + PROMIS_DepressTscore + Dx + Age + ss_meanrt_go, data = psa_full_matchedDataCRN_FCz, weights = weights)
+summary(weightedModelCRN_FCz_MDD) # nothing predicts CRN amplitudes
+# ANOVA
+# code for information about SE, CI, and p-values
+vcov_cr <- vcovCL(
+  weightedModelCRN_FCz_MDD,
+  cluster = psa_full_matchedDataCRN_FCz$subclass
+)
+coeftest(weightedModelCRN_FCz_MDD, vcov = vcov_cr)
+tidyWeightedModel_CRN_FCz_MDD <- tidy(
+  weightedModelCRN_FCz_MDD,
+  vcov = vcov_cr,
+  conf.int = TRUE
+)
+tidyWeightedModel_CRN_FCz_MDD
+aovCorrP3Pz_MDD <- CRN_FCz_outliersRemoved_MDD %>% 
+  anova_test(ERN_FCz_GoTargetRespAvg ~ Rx * Sex * Dx, type = 3) %>%
+  adjust_pvalue(p.col = "p", output.col = "p.adj", method = "bonferroni")
+aovCorrP3Pz_MDD # nothing survives bonferroni correction
+```
+
+```{r CRN_FCz violin plot}
+# adding on HC participants from corrN2_FCz_outliersRemoved_HC into dataframe
+CRN_FCz_outliersRemoved_HConly <- CRN_FCz_outliersRemoved_HC %>%
+  filter(Dx == "HC")
+CRN_FCz_outliersRemoved_MDDvHC <- bind_rows(CRN_FCz_outliersRemoved_HConly,CRN_FCz_outliersRemoved_MDD)
+CRN_FCz_outliersRemoved_MDDvHC <- CRN_FCz_outliersRemoved_MDDvHC %>%
+  mutate(Rx = case_when(
+    Dx == "HC" ~ "Non",
+    Rx == "NonSero" ~ "Unmed",
+    Rx == "Sero" ~ "Med"
+  ))
+# violin plot 
+vioPlotCRNFCz_MDD <- ggplot(CRN_FCz_outliersRemoved_MDDvHC, aes (x = Rx, y = ERN_FCz_GoTargetRespAvg, fill = Rx)) + geom_violin(trim = FALSE) + labs(x = "Medications", y = "Amplitude (μV)")
+vioPlotCRNFCz_MDD + geom_jitter(shape = 16, position = position_jitter(0.2)) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
+
+```{r CRN_FCz box graph}
+# creating dataframe with summary statistics 
+CRN_FCz_MDD_Sum <- CRN_FCz_outliersRemoved_MDDvHC %>%
+  group_by(Rx) %>%
+  summarize(mean=mean(ERN_FCz_GoTargetRespAvg),
+            se=sd(ERN_FCz_GoTargetRespAvg)/sqrt(length(ERN_FCz_GoTargetRespAvg)))
+# creating bar graph (with error bars)
+CRN_FCz_MDD_barGraph <- ggplot(CRN_FCz_MDD_Sum, aes(x = Rx, y = mean, fill = Rx)) + 
+  geom_col(colour = 'black') + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.1) + theme_classic() + scale_fill_manual(values = c("#5f6266","#a5a9ae","#f8f9fa"), guide = "none")
+```
