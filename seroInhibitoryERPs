@@ -1,3 +1,20 @@
+---
+title: 'Medicating inhibitory control? Treatment with serotonergic antidepressants predict stop-N200 and stop-P300 amplitudes in major depressive disorder'
+author: Wesley J.B. Vaught, BS; Eric Mann, BA; Xi Ren, PhD; Ryan J. Tomm, PhD; Ricardo A. Wilheim, PhD; Makiah Torres, BS; Robin L. Aupperle, PhD; Salvador Guinjoan, MD, PhD; Jennifier L. Stewart, PhD; Martin P. Paulus, MD; Evan J. White, PhD
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+   html_document:
+    code_folding: hide
+    theme: cosmo
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
 # Preparation {.tabset .tabset-fade .tabset-pills}
 
 ## Packages
@@ -180,7 +197,7 @@ vars4matrixMDD <- tibble(
 )
 ```
 
-## Correlation Matrix for All Participants & N200, P300, CRN ERPs
+## Correlation Matrix for All Participants & N200, P300, CRN ERPs (n = 233)
 
 ```{r correlation matrix for all ps}
 # correlate the measures in the tibble for all participants
@@ -505,6 +522,18 @@ corrP3_Pz_outliersRemoved_HC %>%
     P3_Pz_AllCorrectAvg ~ Dx,
     p.adjust.method = "bonferroni"
   )
+# data wrangle to calculate effect size
+corrP3_Pz_outliersRemoved_HCvMDD <- corrP3_Pz_outliersRemoved_HC %>%
+  filter(Dx == "HC" | Dx == "MDD"
+)
+corrP3_Pz_outliersRemoved_HCvCOM <- corrP3_Pz_outliersRemoved_HC %>%
+  filter(Dx == "HC" | Dx == "COM"
+)
+# effect size
+corrP3_Pz_outliersRemoved_HCvMDD_d <- cohen.d(P3_Pz_AllCorrectAvg ~ Dx, data = corrP3_Pz_outliersRemoved_HCvMDD)
+corrP3_Pz_outliersRemoved_HCvMDD_d
+corrP3_Pz_outliersRemoved_HCvCOM_d <- cohen.d(P3_Pz_AllCorrectAvg ~ Dx, data = corrP3_Pz_outliersRemoved_HCvCOM)
+corrP3_Pz_outliersRemoved_HCvCOM_d
 ```
 
 ```{r corrP3_Pz violin plot}
