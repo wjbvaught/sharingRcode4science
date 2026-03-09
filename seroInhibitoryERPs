@@ -1,16 +1,3 @@
----
-title: 'Medicating inhibitory control? Treatment with serotonergic antidepressants predict stop-N200 and stop-P300 amplitudes in major depressive disorder'
-author: Wesley J.B. Vaught, BS; Eric Mann, BA; Xi Ren, PhD; Ryan J. Tomm, PhD; Ricardo A. Wilheim, PhD; Makiah Torres, BS; Robin L. Aupperle, PhD; Salvador Guinjoan, MD, PhD; Jennifier L. Stewart, PhD; Martin P. Paulus, MD; Evan J. White, PhD
-date: "`r format(Sys.time(), '%B %d, %Y')`"
-output: 
-   html_document:
-    code_folding: hide
-    theme: cosmo
-    toc: true
-    toc_float: true
-    number_sections: true
----
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -37,10 +24,6 @@ library(broom) # for propensity matching ATE (tidy)
 ```
 
 ## Working directory, residualizing incorrect event-related potentials (ERPs), and reading dataframes to analyze
-
-```{r working directory}
-setwd("C:\\Users\\WVaught\\OneDrive - Laureate Institute for Brain Research\\Documents\\01. EEG CORE\\05. Papers\\SSRI EEG\\01. Submission\\data")
-```
 
 ```{r reading in dataframe for analysis}
 dfT<-read.csv("T1000_redcap_wide-S.T0-2022-01-24.csv") # T1000 demographics and self-report
